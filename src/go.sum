@@ -1,0 +1,4 @@
+github.com/akamensky/argparse v1.4.0 h1:YGzvsTqCvbEZhL8zZu2AiA5nq805NZh75JNj4ajn1xc=
+github.com/akamensky/argparse v1.4.0/go.mod h1:S5kwC7IuDcEr5VeXtGPRVZ5o/FdhcMlQz4IZQuw64xA=
+github.com/turneps403/prqueue v0.0.3 h1:7WDagAo7s/KBng0/DIl733feLRM84DO9S0Q5XU2hyqI=
+github.com/turneps403/prqueue v0.0.3/go.mod h1:NB5ydC4yOpUqOXjg4pgcp7HbWydQFdtPv1AHZgJp1GQ=
