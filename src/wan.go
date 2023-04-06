@@ -1,8 +1,8 @@
 package main
 
 import (
-	"fmt"
-	"time"
+    "fmt"
+    "time"
 )
 
 type WAN struct {

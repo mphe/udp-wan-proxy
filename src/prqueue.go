@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/heap"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -11,6 +12,10 @@ type PriorityT = time.Time
 type Item[T any] struct {
     priority PriorityT
     value    T
+}
+
+func (item Item[T]) String() string {
+    return fmt.Sprintf("priority: %v,  value: %v", item.priority, item.value)
 }
 
 
@@ -39,22 +44,55 @@ func (pq *Heap[T]) Pop() any {
     return item
 }
 
+////////////////////////////////////////////////////////////
 
 type PriorityQueue[T any] struct {
     mu sync.RWMutex
     items Heap[T]
-    ItemAdded chan int
+    itemAdded chan struct{}
 }
 
-// NewPriorityQueue returns a new priority queue with the item's cap set at capacity; if capacity > 0.
-func NewPriorityQueue[T any](capacity int) *PriorityQueue[T] {
-    if capacity <= 0 {
-        return &PriorityQueue[T]{ItemAdded: make(chan int, 1)}
+// Returns and initializes a new priority queue. Smaller values have higher priority.
+func NewPriorityQueue[T any]() *PriorityQueue[T] {
+    pq := &PriorityQueue[T]{
+        itemAdded: make(chan struct{}),
     }
-    return &PriorityQueue[T]{
-        items: make([]Item[T], 0, capacity),
-        ItemAdded: make(chan int),
-    }
+    return pq
+}
+
+// Pushes an item onto the priority queue.
+func (pq *PriorityQueue[T]) Push(priority PriorityT, data T) {
+    pq.mu.Lock()
+    defer pq.mu.Unlock()
+    heap.Push(&pq.items, Item[T]{priority, data})
+
+    // Broadcast the itemAdded signal by closing the channel and at the same time create a new
+    // channel for the next broadcast.
+    // NOTE: Since WaitForItemAdded() requires a read lock, it is ensured that code cannot access
+    // the itemAdded channel in a closed state.
+    close(pq.itemAdded)
+    pq.itemAdded = make(chan struct{})
+}
+
+// Pops the top item from the priority queue. Blocks if the queue is empty.
+func (pq *PriorityQueue[T]) Pop() Item[T] {
+    pq.mu.Lock()
+    defer pq.mu.Unlock()
+
+    pq._WaitForData(&pq.mu)
+
+    return heap.Pop(&pq.items).(Item[T])
+}
+
+// Returns the top item from the priority queue but does not remove it. Blocks if the queue is empty.
+func (pq *PriorityQueue[T]) Peek() Item[T] {
+    pq.mu.RLock()
+    defer pq.mu.RUnlock()
+
+    pq._WaitForData(pq.mu.RLocker())
+
+    // Return a copy to maintain thread safety that wouldn't be guaranteed with a pointer.
+    return pq.items[0]
 }
 
 func (pq *PriorityQueue[T]) Len() int {
@@ -63,51 +101,26 @@ func (pq *PriorityQueue[T]) Len() int {
     return pq.items.Len()
 }
 
-// Pushes an item onto the priority queue.
-func (pq *PriorityQueue[T]) Push(priority PriorityT, data T) {
-    pq.mu.Lock()
-    // defer pq.mu.Unlock()
-    heap.Push(&pq.items, Item[T]{priority, data})
-    pq.mu.Unlock()
-    pq.ItemAdded <- 0
-}
-
-// Pop pops the next item from the priority queue.
-func (pq *PriorityQueue[T]) Pop() Item[T] {
-    pq.mu.Lock()
-    defer pq.mu.Unlock()
-    return pq.items.Pop().(Item[T])
-}
-
-func (pq *PriorityQueue[T]) Peek() Item[T] {
-    pq.mu.RLock()
-    defer pq.mu.RUnlock()
-    // Return a copy to maintain thread safety that wouldn't be guaranteed with a pointer.
-    return pq.items[len(pq.items) - 1]
-}
-
 func (pq *PriorityQueue[T]) IsEmpty() bool {
     return pq.Len() == 0
 }
 
-// Wait until the queue is non-empty.
-func (pq *PriorityQueue[T]) WaitForData() {
-    // Ensure nothing gets added while checking
+
+// Returns a channel that can be listened on to wait until the next item is added.
+func (pq *PriorityQueue[T]) WaitForItemAdded() <-chan struct{} {
     pq.mu.RLock()
+    defer pq.mu.RUnlock()
+    return pq.itemAdded
+}
 
-    if !pq.IsEmpty() {
-        pq.mu.RUnlock()
-        return
+
+// Works like sync.Cond.Wait(). Acquire pq.mu, then call _WaitForData().
+func (pq *PriorityQueue[T]) _WaitForData(locker sync.Locker) {
+    // We can't use pq.IsEmpty() here, because it would require a read lock in Len() but we can't
+    // require a read lock if holding a write lock.
+    for pq.items.Len() == 0 {
+        locker.Unlock()
+        <-pq.itemAdded
+        locker.Lock()
     }
-
-    // Remove last flag (if possible)
-    select {
-        case <-pq.ItemAdded:
-        default:
-    }
-
-    pq.mu.RUnlock()
-
-    // Wait
-    <-pq.ItemAdded
 }

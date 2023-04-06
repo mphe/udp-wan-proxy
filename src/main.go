@@ -17,12 +17,6 @@ import (
 const RUNNING_LATE_WARN_THRESHOLD = time.Duration(500) * time.Microsecond
 
 
-type QueueData struct {
-    target_time float32
-    data []byte
-}
-
-
 type PacketQueue = PriorityQueue[[]byte]
 
 
@@ -45,8 +39,9 @@ func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, w
         if n > 0 {
             data := make([]byte, n)
             copy(data, buf[:n])
+            sendtime := wan.compute_send_timestamp()
             fmt.Println("Received:", len(data))
-            queue.Push(wan.compute_send_timestamp(), data)
+            queue.Push(sendtime, data)
         }
 
         if err != nil {
@@ -69,23 +64,15 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
     defer sender.Close()
 
     for {
-        if queue.IsEmpty() {
-            fmt.Println("Waiting for queue data")
-            <-queue.ItemAdded
-            fmt.Println("Finished waiting")
-        }
-
-        fmt.Println("Peek")
-        timeDelta := queue.Peek().priority.Sub(time.Now())
-        fmt.Println("Peek done")
+        targetTime := queue.Peek().priority
+        timeDelta := targetTime.Sub(time.Now())  // Ensure time.Now() gets evaluated after Peek()
 
         if timeDelta > 0 {
-            fmt.Println("Waiting ", timeDelta)
+            // fmt.Println("Waiting ", timeDelta)
 
             select {
             case <-time.After(timeDelta):
-            case <- queue.ItemAdded:
-                fmt.Println("Item Added -> restart")
+            case <-queue.WaitForItemAdded():
                 continue // New packet added, maybe it is scheduled earlier than the current one
             }
         }
@@ -95,10 +82,8 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
         // waiting for. Hence, we fetch the the top packet again.
         // Correctness:
         // If the new packet is scheduled at the same time or earlier, we don't have to wait
-        // again, obviously. If it is scheduled later, we're fine.
-        fmt.Println("Pop")
+        // again. If it is scheduled later, it does not matter, as we're not dealing with it.
         packet := queue.Pop()
-        fmt.Println("Pop done")
 
         diff := time.Now().Sub(packet.priority)
         if diff > RUNNING_LATE_WARN_THRESHOLD {
@@ -140,7 +125,7 @@ func main() {
 
     fmt.Println("Relay address:", relay_addr)
 
-    var pq *PacketQueue = NewPriorityQueue[[]byte](-1)
+    var pq *PacketQueue = NewPriorityQueue[[]byte]()
     var wg sync.WaitGroup
     wan := WAN{
         delay: time.Duration(*delay_seconds * float64(time.Second)),
