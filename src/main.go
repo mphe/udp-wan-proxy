@@ -40,7 +40,7 @@ func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, w
             data := make([]byte, n)
             copy(data, buf[:n])
             sendtime := wan.compute_send_timestamp()
-            fmt.Println("Received:", len(data))
+            // fmt.Println("Received:", len(data))
             queue.Push(sendtime, data)
         }
 
@@ -91,7 +91,7 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
         }
 
         _, err := sender.Write(packet.value)
-        fmt.Println("Sent:", len(packet.value))
+        // fmt.Println("Sent:", len(packet.value))
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.
@@ -127,15 +127,12 @@ func main() {
 
     var pq *PacketQueue = NewPriorityQueue[[]byte]()
     var wg sync.WaitGroup
-    wan := WAN{
-        delay: time.Duration(*delay_seconds * float64(time.Second)),
-        jitter: time.Duration(*jitter_seconds * float64(time.Second)),
-    }
+    wan := NewWAN(*jitter_seconds, *delay_seconds)
 
-    fmt.Println(&wan)
+    fmt.Println(wan)
 
     wg.Add(1)
-    go run_listener(&wg, &listen_addr, pq, &wan)
+    go run_listener(&wg, &listen_addr, pq, wan)
     wg.Add(1)
     go run_sender(&wg, &relay_addr, pq)
 
