@@ -32,16 +32,22 @@ func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, w
 
     defer listener.Close()
 
+    buf := make([]byte, 4096)
+
     for {
-        buf := make([]byte, 4096)
         n, _, err := listener.ReadFrom(buf)
 
         if n > 0 {
+            targetTime, drop := wan.compute_next_timestamp()
+            if drop {
+                fmt.Println("X  Packet lost", n)
+                continue
+            }
+
+            fmt.Println("-> Received:", n)
             data := make([]byte, n)
             copy(data, buf[:n])
-            sendtime := wan.compute_send_timestamp()
-            // fmt.Println("Received:", len(data))
-            queue.Push(sendtime, data)
+            queue.Push(targetTime, data)
         }
 
         if err != nil {
@@ -63,11 +69,16 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
 
     defer sender.Close()
 
+    clock_inaccuracy := time.Duration(0)
+    num_sent := time.Duration(0)
+
     for {
         targetTime := queue.Peek().priority
         timeDelta := targetTime.Sub(time.Now())  // Ensure time.Now() gets evaluated after Peek()
 
-        if timeDelta > 0 {
+        if timeDelta < 0 {
+            fmt.Println("Target time behind schedule", timeDelta)
+        } else {
             // fmt.Println("Waiting ", timeDelta)
 
             select {
@@ -86,12 +97,16 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
         packet := queue.Pop()
 
         diff := time.Now().Sub(packet.priority)
+        clock_inaccuracy += diff
+        num_sent += 1
+
         if diff > RUNNING_LATE_WARN_THRESHOLD {
-            log.Println("Running late:", diff.Microseconds(), "µs")
+            fmt.Println("Running late:", diff)
+            fmt.Println("Average clock inaccuracy:", clock_inaccuracy / num_sent)
         }
 
         _, err := sender.Write(packet.value)
-        // fmt.Println("Sent:", len(packet.value))
+        fmt.Println("<- Sent:", len(packet.value))
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.
@@ -108,6 +123,8 @@ func main() {
     relay_port := parser.Int("r", "relay", &argparse.Options{Required: true, Help: "Port to relay packets to"})
     delay_seconds := parser.Float("d", "delay", &argparse.Options{Required: false, Help: "Packet delay in seconds", Default: 0.0})
     jitter_seconds := parser.Float("j", "jitter", &argparse.Options{Required: false, Help: "Random packet jitter in seconds", Default: 0.0})
+    probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur", Default: 0.0})
+    probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end", Default: 0.0})
 
     err := parser.Parse(os.Args)
 
@@ -128,6 +145,8 @@ func main() {
     var pq *PacketQueue = NewPriorityQueue[[]byte]()
     var wg sync.WaitGroup
     wan := NewWAN(*jitter_seconds, *delay_seconds)
+    wan.probPacketLossStart = float32(*probPacketLossStart)
+    wan.probPacketLossStop = float32(*probPacketLossStop)
 
     fmt.Println(wan)
 
