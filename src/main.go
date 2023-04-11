@@ -17,10 +17,15 @@ import (
 const RUNNING_LATE_WARN_THRESHOLD = time.Duration(500) * time.Microsecond
 
 
-type PacketQueue = PriorityQueue[[]byte]
+type PacketEntry struct {
+    data []byte
+    targetTime time.Time
+}
+
+type PacketQueue = chan PacketEntry
 
 
-func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, wan *WAN) {
+func run_listener(wg *sync.WaitGroup, listen_addr *string, queue PacketQueue, wan *WAN) {
     defer wg.Done()
 
     fmt.Println("Starting listener on", *listen_addr)
@@ -33,15 +38,17 @@ func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, w
     defer listener.Close()
 
     for {
-        buf := make([]byte, 4096)
+        buf := make([]byte, 2048)
         n, _, err := listener.ReadFrom(buf)
 
         if n > 0 {
+            fmt.Println("Received:", n)
             data := make([]byte, n)
             copy(data, buf[:n])
-            sendtime := wan.compute_send_timestamp()
-            // fmt.Println("Received:", len(data))
-            queue.Push(sendtime, data)
+            queue <- PacketEntry{
+                data: data,
+                targetTime: wan.compute_send_timestamp(),
+            }
         }
 
         if err != nil {
@@ -51,7 +58,22 @@ func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, w
 }
 
 
-func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
+// Sleep for "duration" in intervals of "resolution".
+func spinlockSleep(duration time.Duration, resolution time.Duration) {
+    targetTime := time.Now().Add(duration)
+
+    for duration > 0 {
+        sleep := resolution
+        if duration < sleep {
+            sleep = duration
+        }
+        time.Sleep(sleep)
+        duration = targetTime.Sub(time.Now())
+    }
+}
+
+
+func run_sender(wg *sync.WaitGroup, relay_addr *string, queue PacketQueue) {
     defer wg.Done()
 
     fmt.Println("Starting relay to", *relay_addr)
@@ -63,35 +85,46 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
 
     defer sender.Close()
 
+    num_sent := time.Duration(0)
+    clock_inaccuracy := time.Duration(0)
+
     for {
-        targetTime := queue.Peek().priority
-        timeDelta := targetTime.Sub(time.Now())  // Ensure time.Now() gets evaluated after Peek()
+        packet := <- queue
+        timeDelta := packet.targetTime.Sub(time.Now())
 
-        if timeDelta > 0 {
-            // fmt.Println("Waiting ", timeDelta)
+        // | Method                | Avg lateness | Notes                                         |
+        // |-----------------------+--------------+-----------------------------------------------|
+        // | Single sleep          | ~500µs       | Avg CPU usage ~4%                             |
+        // | Spinlock, 1µs sleep   | ~200µs       | Avg CPU usage ~8%                             |
+        // | Spinlock, 100ns sleep | ~15µs        | Avg CPU usage ~19%                            |
+        // | Spinlock, while true  | ~90ns - 1µs  | Avg CPU usage ~14%, but one CPU core on 100%. |
 
-            select {
-            case <-time.After(timeDelta):
-            case <-queue.WaitForItemAdded():
-                continue // New packet added, maybe it is scheduled earlier than the current one
+        if timeDelta < 0 {
+            fmt.Println("Target time behind schedule", timeDelta)
+        } else {
+            // Sleep spinlock
+            spinlockSleep(timeDelta, time.Duration(1) * time.Microsecond)
+
+            // Single sleep
+            // time.Sleep(timeDelta)
+
+            // Spinlock
+            // for timeDelta > 0 {
+            //     timeDelta = packet.targetTime.Sub(time.Now())
+            // }
+
+            diff := time.Now().Sub(packet.targetTime)
+            clock_inaccuracy += diff
+            num_sent += 1
+            fmt.Println("Average clock inaccuracy:", clock_inaccuracy / num_sent)
+
+            if diff > RUNNING_LATE_WARN_THRESHOLD {
+                fmt.Println("Running late:", diff)
             }
+
         }
-
-        // Theoretically, time.After and ItemAdded could occur simultaneously.
-        // In that case, the new packet might be scheduled earlier than the one we're currently
-        // waiting for. Hence, we fetch the the top packet again.
-        // Correctness:
-        // If the new packet is scheduled at the same time or earlier, we don't have to wait
-        // again. If it is scheduled later, it does not matter, as we're not dealing with it.
-        packet := queue.Pop()
-
-        diff := time.Now().Sub(packet.priority)
-        if diff > RUNNING_LATE_WARN_THRESHOLD {
-            log.Println("Running late:", diff.Microseconds(), "µs")
-        }
-
-        _, err := sender.Write(packet.value)
-        // fmt.Println("Sent:", len(packet.value))
+        _, err := sender.Write(packet.data)
+        fmt.Println("Sent:", len(packet.data))
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.
@@ -112,7 +145,7 @@ func main() {
     err := parser.Parse(os.Args)
 
     if err != nil {
-        log.Println(parser.Usage(nil))
+        fmt.Println(parser.Usage(nil))
         log.Fatal(err)
     }
 
@@ -125,16 +158,16 @@ func main() {
 
     fmt.Println("Relay address:", relay_addr)
 
-    var pq *PacketQueue = NewPriorityQueue[[]byte]()
+    queue := make(PacketQueue)
     var wg sync.WaitGroup
     wan := NewWAN(*jitter_seconds, *delay_seconds)
 
     fmt.Println(wan)
 
     wg.Add(1)
-    go run_listener(&wg, &listen_addr, pq, wan)
+    go run_listener(&wg, &listen_addr, queue, wan)
     wg.Add(1)
-    go run_sender(&wg, &relay_addr, pq)
+    go run_sender(&wg, &relay_addr, queue)
 
     wg.Wait()
 }
