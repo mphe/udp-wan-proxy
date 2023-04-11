@@ -42,12 +42,20 @@ func run_listener(wg *sync.WaitGroup, listen_addr *string, queue PacketQueue, wa
         n, _, err := listener.ReadFrom(buf)
 
         if n > 0 {
-            fmt.Println("Received:", n)
+            fmt.Println("-> Received:", n)
+
+            targetTime, drop := wan.compute_next_timestamp()
+            if drop {
+                fmt.Println("    Packet lost")
+                continue
+            }
+
             data := make([]byte, n)
             copy(data, buf[:n])
+
             queue <- PacketEntry{
                 data: data,
-                targetTime: wan.compute_send_timestamp(),
+                targetTime: targetTime,
             }
         }
 
@@ -116,15 +124,15 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue PacketQueue) {
             diff := time.Now().Sub(packet.targetTime)
             clock_inaccuracy += diff
             num_sent += 1
-            fmt.Println("Average clock inaccuracy:", clock_inaccuracy / num_sent)
 
             if diff > RUNNING_LATE_WARN_THRESHOLD {
                 fmt.Println("Running late:", diff)
+                fmt.Println("Average clock inaccuracy:", clock_inaccuracy / num_sent)
             }
 
         }
         _, err := sender.Write(packet.data)
-        fmt.Println("Sent:", len(packet.data))
+        fmt.Println("<- Sent:", len(packet.data))
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.
@@ -141,6 +149,8 @@ func main() {
     relay_port := parser.Int("r", "relay", &argparse.Options{Required: true, Help: "Port to relay packets to"})
     delay_seconds := parser.Float("d", "delay", &argparse.Options{Required: false, Help: "Packet delay in seconds", Default: 0.0})
     jitter_seconds := parser.Float("j", "jitter", &argparse.Options{Required: false, Help: "Random packet jitter in seconds", Default: 0.0})
+    probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur", Default: 0.0})
+    probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end", Default: 0.0})
 
     err := parser.Parse(os.Args)
 
@@ -161,6 +171,8 @@ func main() {
     queue := make(PacketQueue)
     var wg sync.WaitGroup
     wan := NewWAN(*jitter_seconds, *delay_seconds)
+    wan.probPacketLossStart = float32(*probPacketLossStart)
+    wan.probPacketLossStop = float32(*probPacketLossStop)
 
     fmt.Println(wan)
 
