@@ -73,11 +73,17 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
     sender.SetWriteBuffer(SOCKET_RW_BUFFER_SIZE)
     defer sender.Close()
 
-    clock_inaccuracy := time.Duration(0)
-    num_sent := time.Duration(0)
+    var clock_inaccuracy time.Duration
+    var num_sent time.Duration
+    var last_time time.Time  // Used to check for packet reordering
 
     for {
         targetTime := queue.Peek().priority
+
+        if targetTime != last_time {
+            fmt.Println("<=> Packet reordered")
+        }
+
         timeDelta := targetTime.Sub(time.Now())  // Ensure time.Now() gets evaluated after Peek()
 
         if timeDelta < 0 {
@@ -86,6 +92,7 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
             select {
             case <-time.After(timeDelta):
             case <-queue.WaitForItemAdded():
+                last_time = targetTime
                 continue // New packet added, maybe it is scheduled earlier than the current one
             }
         }
@@ -131,7 +138,7 @@ func main() {
     err := parser.Parse(os.Args)
 
     if err != nil {
-        log.Println(parser.Usage(nil))
+        fmt.Println(parser.Usage(nil))
         log.Fatal(err)
     }
 
