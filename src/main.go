@@ -15,21 +15,24 @@ import (
 )
 
 const RUNNING_LATE_WARN_THRESHOLD = time.Duration(500) * time.Microsecond
+const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
+const SPINLOCK_SLEEP_TIME = time.Duration(1) * time.Microsecond
 
 
 type PacketQueue = PriorityQueue[[]byte]
 
 
-func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, wan *WAN) {
+func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *WAN) {
     defer wg.Done()
 
-    fmt.Println("Starting listener on", *listen_addr)
-    listener, err := net.ListenPacket("udp", *listen_addr)
+    fmt.Println("Starting listener on", listen_port)
+    listener, err := net.ListenUDP("udp", &net.UDPAddr { Port: listen_port })
 
     if err != nil {
         log.Fatal(err)
     }
 
+    listener.SetReadBuffer(SOCKET_RW_BUFFER_SIZE)
     defer listener.Close()
 
     buf := make([]byte, 4096)
@@ -57,16 +60,17 @@ func run_listener(wg *sync.WaitGroup, listen_addr *string, queue *PacketQueue, w
 }
 
 
-func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
+func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
     defer wg.Done()
 
-    fmt.Println("Starting relay to", *relay_addr)
-    sender, err := net.Dial("udp", *relay_addr)
+    fmt.Println("Starting relay to", relay_port)
+    sender, err := net.DialUDP("udp", nil, &net.UDPAddr { Port: relay_port })
 
     if err != nil {
         log.Fatal(err)
     }
 
+    sender.SetWriteBuffer(SOCKET_RW_BUFFER_SIZE)
     defer sender.Close()
 
     clock_inaccuracy := time.Duration(0)
@@ -79,8 +83,6 @@ func run_sender(wg *sync.WaitGroup, relay_addr *string, queue *PacketQueue) {
         if timeDelta < 0 {
             fmt.Println("Target time behind schedule", timeDelta)
         } else {
-            // fmt.Println("Waiting ", timeDelta)
-
             select {
             case <-time.After(timeDelta):
             case <-queue.WaitForItemAdded():
@@ -136,11 +138,7 @@ func main() {
     fmt.Println("Version", runtime.Version())
     fmt.Println("NumCPU", runtime.NumCPU())
     fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0))
-
-    listen_addr := fmt.Sprintf(":%v", *listen_port)
-    relay_addr := fmt.Sprintf(":%v", *relay_port)
-
-    fmt.Println("Relay address:", relay_addr)
+    fmt.Println()
 
     var pq *PacketQueue = NewPriorityQueue[[]byte]()
     var wg sync.WaitGroup
@@ -151,9 +149,9 @@ func main() {
     fmt.Println(wan)
 
     wg.Add(1)
-    go run_listener(&wg, &listen_addr, pq, wan)
+    go run_listener(&wg, *listen_port, pq, wan)
     wg.Add(1)
-    go run_sender(&wg, &relay_addr, pq)
+    go run_sender(&wg, *relay_port, pq)
 
     wg.Wait()
 }
