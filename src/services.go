@@ -12,7 +12,7 @@ import (
 
 const RUNNING_LATE_WARN_THRESHOLD = time.Duration(500) * time.Microsecond
 const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
-const SPINLOCK_SLEEP_TIME = time.Duration(1) * time.Microsecond
+const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
 
 
 type PacketQueue = PriorityQueue[[]byte]
@@ -75,21 +75,18 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
 
     for {
         targetTime := queue.Peek().priority
+        timeDelta := targetTime.Sub(time.Now())  // Ensure time.Now() gets evaluated after Peek()
 
         if targetTime != last_time {
             fmt.Println("<=> Packet reordered")
         }
 
-        timeDelta := targetTime.Sub(time.Now())  // Ensure time.Now() gets evaluated after Peek()
-
         if timeDelta < 0 {
             fmt.Println("Target time behind schedule", timeDelta)
         } else {
-            select {
-            case <-time.After(timeDelta):
-            case <-queue.WaitForItemAdded():
+            if !spinSleep(timeDelta, SPINLOCK_SLEEP_TIME, queue.WaitForItemAdded()) {
                 last_time = targetTime
-                continue // New packet added, maybe it is scheduled earlier than the current one
+                continue  // New packet added, maybe it is scheduled earlier than the current one
             }
         }
 
@@ -119,4 +116,33 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
             log.Fatal(err)
         }
     }
+}
+
+
+// Sleep for "duration" in intervals of "sleepInterval". interrupt_chan is a channel that can be
+// written to break the sleep and return.
+// Returns false when it was interrupted, true otherwise.
+func spinSleep(duration time.Duration, sleepInterval time.Duration, interrupt_chan <-chan struct{}) bool {
+    targetTime := time.Now().Add(duration)
+
+    for duration > 0 {
+        sleep := sleepInterval
+        if duration < sleep {
+            sleep = duration
+        }
+
+        if interrupt_chan == nil {
+            time.Sleep(sleep)
+        } else {
+            select {
+            case <-time.After(sleep):
+            case <-interrupt_chan:
+                return false
+            }
+        }
+
+        duration = targetTime.Sub(time.Now())
+    }
+
+    return true
 }
