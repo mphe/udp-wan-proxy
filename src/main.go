@@ -38,7 +38,7 @@ func main() {
     wan.probPacketLossStop = float32(*probPacketLossStop)
     fmt.Println(wan)
 
-    pq := NewPriorityQueue[[]byte]()
+    pq := NewPacketQueue()
     stats := Statistics{}
 
     var wg sync.WaitGroup

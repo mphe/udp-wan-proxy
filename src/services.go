@@ -15,9 +15,6 @@ const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
 const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
 
 
-type PacketQueue = PriorityQueue[[]byte]
-
-
 func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *WAN, stats *Statistics) {
     defer wg.Done()
 
@@ -46,7 +43,8 @@ func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *
             stats.Received(n)
             data := make([]byte, n)
             copy(data, buf[:n])
-            queue.Push(targetTime, data)
+            queue.timeQueue.Push(targetTime, struct{}{})
+            queue.packetQueue <- data
         }
 
         if err != nil {
@@ -71,37 +69,29 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *S
 
     var clock_inaccuracy time.Duration
     var num_sent time.Duration
-    var last_time time.Time  // Used to check for packet reordering
-    var checkReorder bool
 
     for {
-        targetTime := queue.Peek().priority
+        targetTime := queue.timeQueue.Peek().priority
         timeDelta := time.Until(targetTime)  // Ensure time.Now() gets evaluated after Peek()
-
-        if checkReorder && !targetTime.Equal(last_time) {
-            stats.Reordered()
-        }
-        checkReorder = false
 
         if timeDelta < 0 {
             fmt.Println("Target time behind schedule", timeDelta)
         } else {
-            if !spinSleep(timeDelta, SPINLOCK_SLEEP_TIME, queue.WaitForItemAdded()) {
-                last_time = targetTime
-                checkReorder = true
-                continue  // New packet added, maybe it is scheduled earlier than the current one
+            if !spinSleep(timeDelta, SPINLOCK_SLEEP_TIME, queue.timeQueue.WaitForItemAdded()) {
+                continue  // New timestamp added, maybe it is scheduled earlier than the current one
             }
         }
 
+        // Finished waiting, pop the timestamp.
         // Theoretically, time.After and ItemAdded could occur simultaneously.
         // In that case, the new packet might be scheduled earlier than the one we're currently
         // waiting for. Hence, we fetch the the top packet again.
         // Correctness:
         // If the new packet is scheduled at the same time or earlier, we don't have to wait
         // again. If it is scheduled later, it does not matter, as we're not dealing with it.
-        packet := queue.Pop()
+        timestamp := queue.timeQueue.Pop().priority
 
-        diff := time.Since(packet.priority)
+        diff := time.Since(timestamp)
         clock_inaccuracy += diff
         num_sent += 1
 
@@ -110,8 +100,9 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *S
             fmt.Println("Average clock inaccuracy:", clock_inaccuracy / num_sent)
         }
 
-        _, err := sender.Write(packet.value)
-        stats.Sent(len(packet.value))
+        data := <- queue.packetQueue
+        _, err := sender.Write(data)
+        stats.Sent(len(data))
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.
