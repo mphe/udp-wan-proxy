@@ -67,9 +67,6 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *S
     sender.SetWriteBuffer(SOCKET_RW_BUFFER_SIZE)
     defer sender.Close()
 
-    var clock_inaccuracy time.Duration
-    var num_sent time.Duration
-
     for {
         targetTime := queue.timeQueue.Peek().priority
         timeDelta := time.Until(targetTime)  // Ensure time.Now() gets evaluated after Peek()
@@ -91,18 +88,16 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *S
         // again. If it is scheduled later, it does not matter, as we're not dealing with it.
         timestamp := queue.timeQueue.Pop().priority
 
-        diff := time.Since(timestamp)
-        clock_inaccuracy += diff
-        num_sent += 1
+        // Compute clock inaccuracy
+        clockDiff := time.Since(timestamp)
 
-        if diff > RUNNING_LATE_WARN_THRESHOLD {
-            fmt.Println("Running late:", diff, ", waited for", timeDelta)
-            fmt.Println("Average clock inaccuracy:", clock_inaccuracy / num_sent)
+        if clockDiff > RUNNING_LATE_WARN_THRESHOLD {
+            fmt.Println("Running late:", clockDiff, ", waited for", timeDelta)
         }
 
         data := <- queue.packetQueue
         _, err := sender.Write(data)
-        stats.Sent(len(data))
+        stats.Sent(len(data), clockDiff)
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.
