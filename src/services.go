@@ -18,7 +18,7 @@ const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
 type PacketQueue = PriorityQueue[[]byte]
 
 
-func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *WAN) {
+func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *WAN, stats *Statistics) {
     defer wg.Done()
 
     fmt.Println("Starting listener on", listen_port)
@@ -39,11 +39,11 @@ func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *
         if n > 0 {
             targetTime, drop := wan.compute_next_timestamp()
             if drop {
-                fmt.Println("X  Packet lost", n)
+                stats.Lost()
                 continue
             }
 
-            fmt.Println("-> Received:", n)
+            stats.Received(n)
             data := make([]byte, n)
             copy(data, buf[:n])
             queue.Push(targetTime, data)
@@ -56,7 +56,7 @@ func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *
 }
 
 
-func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
+func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *Statistics) {
     defer wg.Done()
 
     fmt.Println("Starting relay to", relay_port)
@@ -72,20 +72,23 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
     var clock_inaccuracy time.Duration
     var num_sent time.Duration
     var last_time time.Time  // Used to check for packet reordering
+    var checkReorder bool
 
     for {
         targetTime := queue.Peek().priority
-        timeDelta := targetTime.Sub(time.Now())  // Ensure time.Now() gets evaluated after Peek()
+        timeDelta := time.Until(targetTime)  // Ensure time.Now() gets evaluated after Peek()
 
-        if targetTime != last_time {
-            fmt.Println("<=> Packet reordered")
+        if checkReorder && !targetTime.Equal(last_time) {
+            stats.Reordered()
         }
+        checkReorder = false
 
         if timeDelta < 0 {
             fmt.Println("Target time behind schedule", timeDelta)
         } else {
             if !spinSleep(timeDelta, SPINLOCK_SLEEP_TIME, queue.WaitForItemAdded()) {
                 last_time = targetTime
+                checkReorder = true
                 continue  // New packet added, maybe it is scheduled earlier than the current one
             }
         }
@@ -98,17 +101,17 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue) {
         // again. If it is scheduled later, it does not matter, as we're not dealing with it.
         packet := queue.Pop()
 
-        diff := time.Now().Sub(packet.priority)
+        diff := time.Since(packet.priority)
         clock_inaccuracy += diff
         num_sent += 1
 
         if diff > RUNNING_LATE_WARN_THRESHOLD {
-            fmt.Println("Running late:", diff)
+            fmt.Println("Running late:", diff, ", waited for", timeDelta)
             fmt.Println("Average clock inaccuracy:", clock_inaccuracy / num_sent)
         }
 
         _, err := sender.Write(packet.value)
-        fmt.Println("<- Sent:", len(packet.value))
+        stats.Sent(len(packet.value))
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.
@@ -141,7 +144,7 @@ func spinSleep(duration time.Duration, sleepInterval time.Duration, interrupt_ch
             }
         }
 
-        duration = targetTime.Sub(time.Now())
+        duration = time.Until(targetTime)
     }
 
     return true

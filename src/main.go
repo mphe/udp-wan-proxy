@@ -1,14 +1,15 @@
 package main
 
 import (
-    "fmt"
-    "log"
-    "os"
-    "runtime"
-    "sync"
-    "github.com/akamensky/argparse"
-)
+	"fmt"
+	"log"
+	"os"
+	"runtime"
+	"sync"
+	"time"
 
+	"github.com/akamensky/argparse"
+)
 
 
 func main() {
@@ -32,18 +33,21 @@ func main() {
     fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0))
     fmt.Println()
 
-    var pq *PacketQueue = NewPriorityQueue[[]byte]()
-    var wg sync.WaitGroup
     wan := NewWAN(*jitter_seconds, *delay_seconds)
     wan.probPacketLossStart = float32(*probPacketLossStart)
     wan.probPacketLossStop = float32(*probPacketLossStop)
-
     fmt.Println(wan)
 
+    pq := NewPriorityQueue[[]byte]()
+    stats := Statistics{}
+
+    var wg sync.WaitGroup
     wg.Add(1)
-    go run_listener(&wg, *listen_port, pq, wan)
+    stats.StartWatchThread(&wg, time.Duration(1) * time.Second)
     wg.Add(1)
-    go run_sender(&wg, *relay_port, pq)
+    go run_listener(&wg, *listen_port, pq, wan, &stats)
+    wg.Add(1)
+    go run_sender(&wg, *relay_port, pq, &stats)
 
     wg.Wait()
 }
