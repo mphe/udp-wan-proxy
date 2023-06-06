@@ -78,9 +78,7 @@ func (pq *PriorityQueue[T]) Push(priority PriorityT, data T) {
 func (pq *PriorityQueue[T]) Pop() Item[T] {
     pq.mu.Lock()
     defer pq.mu.Unlock()
-
     pq._WaitForData(&pq.mu)
-
     return heap.Pop(&pq.items).(Item[T])
 }
 
@@ -88,9 +86,7 @@ func (pq *PriorityQueue[T]) Pop() Item[T] {
 func (pq *PriorityQueue[T]) Peek() Item[T] {
     pq.mu.RLock()
     defer pq.mu.RUnlock()
-
     pq._WaitForData(pq.mu.RLocker())
-
     // Return a copy to maintain thread safety that wouldn't be guaranteed with a pointer.
     return pq.items[0]
 }
@@ -120,7 +116,7 @@ func (pq *PriorityQueue[T]) _WaitForData(locker sync.Locker) {
     // require a read lock if holding a write lock.
     for pq.items.Len() == 0 {
         locker.Unlock()
-        <-pq.itemAdded
+        <-pq.WaitForItemAdded()
         locker.Lock()
     }
 }

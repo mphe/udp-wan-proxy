@@ -11,6 +11,7 @@ import (
 	"github.com/akamensky/argparse"
 )
 
+const MAX_PACKET_QUEUE_SIZE int = 4096  // 4096 packets should suffice in pretty much all cases
 
 func main() {
     parser := argparse.NewParser("UDP-Proxy", "UDP WAN proxy")
@@ -38,7 +39,7 @@ func main() {
     wan.probPacketLossStop = float32(*probPacketLossStop)
     fmt.Println(wan)
 
-    pq := NewPacketQueue()
+    pq := NewPacketQueue(MAX_PACKET_QUEUE_SIZE)
     stats := Statistics{}
 
     var wg sync.WaitGroup
@@ -50,4 +51,5 @@ func main() {
     go run_sender(&wg, *relay_port, pq, &stats)
 
     wg.Wait()
+    pq.close()
 }

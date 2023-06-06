@@ -72,7 +72,7 @@ func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *S
         timeDelta := time.Until(targetTime)  // Ensure time.Now() gets evaluated after Peek()
 
         if timeDelta < 0 {
-            fmt.Println("Target time behind schedule", timeDelta)
+            // fmt.Println("Target time behind schedule", timeDelta)
         } else {
             if !spinSleep(timeDelta, SPINLOCK_SLEEP_TIME, queue.timeQueue.WaitForItemAdded()) {
                 continue  // New timestamp added, maybe it is scheduled earlier than the current one

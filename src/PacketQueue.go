@@ -5,9 +5,13 @@ type PacketQueue struct {
     packetQueue chan []byte
 }
 
-func NewPacketQueue() *PacketQueue {
+func NewPacketQueue(buffer_size int) *PacketQueue {
     return &PacketQueue{
         timeQueue: NewPriorityQueue[struct{}](),
-        packetQueue: make(chan []byte),
+        packetQueue: make(chan []byte, buffer_size),
     }
+}
+
+func (pq *PacketQueue) close() {
+    close(pq.packetQueue)
 }
