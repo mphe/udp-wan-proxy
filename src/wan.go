@@ -9,22 +9,12 @@ import (
 type WAN struct {
     delay time.Duration
     jitter time.Duration
-    _jitterNs float64
     probPacketLossStart float32
     probPacketLossStop float32
     _isPacketLoss bool
 }
 
-func NewWAN(jitterSeconds float64, delaySeconds float64) *WAN {
-    nsPerSecond := float64(time.Second)
-    return &WAN{
-        delay: time.Duration(delaySeconds * nsPerSecond),
-        jitter: time.Duration(jitterSeconds * nsPerSecond),
-	_jitterNs: jitterSeconds * nsPerSecond,
-    }
-}
-
-func (wan *WAN) compute_next_timestamp() (timestamp time.Time, drop bool) {
+func (wan *WAN) NextTimestamp() (timestamp time.Time, drop bool) {
     // Switch between packet-loss state based on given probabilities
     if wan._isPacketLoss {
 	if rand.Float32() < wan.probPacketLossStop {
@@ -42,7 +32,7 @@ func (wan *WAN) compute_next_timestamp() (timestamp time.Time, drop bool) {
 
     ts := time.Now().
 	Add(wan.delay).
-	Add(time.Duration(wan._jitterNs * rand.Float64()))
+	Add(time.Duration(float64(wan.jitter) * rand.Float64()))
 
     return ts, false
 }
@@ -52,7 +42,7 @@ func (wan *WAN) String() string {
     Delay: %v
     Jitter: %v
     Packet loss:
-	Start: %v
-	Stop: %v
-    `, wan.delay, wan.jitter, wan.probPacketLossStart, wan.probPacketLossStop)
+	Start: %v%%
+	Stop: %v%%
+    `, wan.delay, wan.jitter, wan.probPacketLossStart * 100.0, wan.probPacketLossStop * 100.0)
 }

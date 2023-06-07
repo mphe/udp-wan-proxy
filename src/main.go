@@ -17,10 +17,10 @@ func main() {
     parser := argparse.NewParser("UDP-Proxy", "UDP WAN proxy")
     listen_port := parser.Int("l", "listen", &argparse.Options{Required: true, Help: "Port to listen on"})
     relay_port := parser.Int("r", "relay", &argparse.Options{Required: true, Help: "Port to relay packets to"})
-    delay_seconds := parser.Float("d", "delay", &argparse.Options{Required: false, Help: "Packet delay in seconds", Default: 0.0})
-    jitter_seconds := parser.Float("j", "jitter", &argparse.Options{Required: false, Help: "Random packet jitter in seconds", Default: 0.0})
-    probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur", Default: 0.0})
-    probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end", Default: 0.0})
+    delay_ms := parser.Int("d", "delay", &argparse.Options{Required: false, Help: "Packet delay in milliseconds", Default: 0})
+    jitter_ms := parser.Int("j", "jitter", &argparse.Options{Required: false, Help: "Random packet jitter in milliseconds", Default: 0})
+    probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur (0.0 - 1.0)", Default: 0.0})
+    probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end (0.0 - 1.0)", Default: 0.0})
 
     err := parser.Parse(os.Args)
 
@@ -34,10 +34,13 @@ func main() {
     fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0))
     fmt.Println()
 
-    wan := NewWAN(*jitter_seconds, *delay_seconds)
-    wan.probPacketLossStart = float32(*probPacketLossStart)
-    wan.probPacketLossStop = float32(*probPacketLossStop)
-    fmt.Println(wan)
+    wan := WAN {
+	delay: time.Duration(*delay_ms) * time.Millisecond,
+	jitter: time.Duration(*jitter_ms) * time.Millisecond,
+	probPacketLossStart: float32(*probPacketLossStart),
+	probPacketLossStop: float32(*probPacketLossStop),
+    }
+    fmt.Println(&wan)
 
     pq := NewPacketQueue(MAX_PACKET_QUEUE_SIZE)
     stats := Statistics{}
@@ -46,10 +49,10 @@ func main() {
     wg.Add(1)
     stats.StartWatchThread(&wg, time.Duration(1) * time.Second)
     wg.Add(1)
-    go run_listener(&wg, *listen_port, pq, wan, &stats)
+    go RunListener(&wg, *listen_port, pq, &wan, &stats)
     wg.Add(1)
-    go run_sender(&wg, *relay_port, pq, &stats)
+    go RunSender(&wg, *relay_port, pq, &stats)
 
     wg.Wait()
-    pq.close()
+    pq.Close()
 }

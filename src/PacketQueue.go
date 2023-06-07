@@ -12,6 +12,6 @@ func NewPacketQueue(buffer_size int) *PacketQueue {
     }
 }
 
-func (pq *PacketQueue) close() {
+func (pq *PacketQueue) Close() {
     close(pq.packetQueue)
 }

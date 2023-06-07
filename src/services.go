@@ -15,7 +15,7 @@ const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
 const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
 
 
-func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *WAN, stats *Statistics) {
+func RunListener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *WAN, stats *Statistics) {
     defer wg.Done()
 
     fmt.Println("Starting listener on", listen_port)
@@ -34,7 +34,7 @@ func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *
         n, _, err := listener.ReadFrom(buf)
 
         if n > 0 {
-            targetTime, drop := wan.compute_next_timestamp()
+            targetTime, drop := wan.NextTimestamp()
             if drop {
                 stats.Lost()
                 continue
@@ -54,7 +54,7 @@ func run_listener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *
 }
 
 
-func run_sender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *Statistics) {
+func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *Statistics) {
     defer wg.Done()
 
     fmt.Println("Starting relay to", relay_port)
