@@ -10,7 +10,7 @@ import (
     "time"
 )
 
-const RUNNING_LATE_WARN_THRESHOLD = time.Duration(500) * time.Microsecond
+// const RUNNING_LATE_WARN_THRESHOLD = time.Duration(500) * time.Microsecond
 const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
 const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
 
@@ -91,9 +91,9 @@ func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *St
         // Compute clock inaccuracy
         clockDiff := time.Since(timestamp)
 
-        if clockDiff > RUNNING_LATE_WARN_THRESHOLD {
-            fmt.Println("Running late:", clockDiff, ", waited for", timeDelta)
-        }
+        // if clockDiff > RUNNING_LATE_WARN_THRESHOLD {
+        //     fmt.Println("Running late:", clockDiff, ", waited for", timeDelta)
+        // }
 
         data := <- queue.packetQueue
         _, err := sender.Write(data)
