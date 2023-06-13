@@ -57,6 +57,8 @@ func (stats *Statistics) StartWatchThread(wg *sync.WaitGroup, interval time.Dura
     go func() {
         defer wg.Done()
 
+        intervalS := float32(interval / time.Second)
+
         for {
             time.Sleep(interval)
 
@@ -64,10 +66,17 @@ func (stats *Statistics) StartWatchThread(wg *sync.WaitGroup, interval time.Dura
                 continue
             }
 
+            sentKB := float32(stats.sentBytes) / 1024
+            recvKB := float32(stats.receivedBytes) / 1024
+            sentKb := (sentKB * 8) / intervalS
+            recvKb := (recvKB * 8) / intervalS
+            sentMb := sentKb / 1024
+            recvMb := recvKb / 1024
+
             fmt.Println("---------------- Statistics ----------------")
             fmt.Println("Interval: ", interval)
-            fmt.Printf("Sent:      %v packets, %v KiB\n", stats.sent, float32(stats.sentBytes) / 1024)
-            fmt.Printf("Received:  %v packets, %v KiB\n", stats.received, float32(stats.receivedBytes) / 1024)
+            fmt.Printf("Sent:      %v packets, %v KB, %v Kb/s, %v Mb/s\n", stats.sent, sentKB, sentKb, sentMb)
+            fmt.Printf("Received:  %v packets, %v KB, %v Kb/s, %v Mb/s\n", stats.received, recvKB, recvKb, recvMb)
             fmt.Printf("Lost:      %v packets\n", stats.lost)
             fmt.Printf("Avg. clock inaccuracy: %v\n", time.Duration(stats.clockDeltaNs / Max(1, stats.sent)))
             fmt.Println("--------------------------------------------")
