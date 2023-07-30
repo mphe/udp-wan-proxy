@@ -2,18 +2,29 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// Go does not have a Min() function for integers in its stdlib...
-func Max(a, b int64) int64 {
+// Go does not have a Max()/Min() function for integers in its stdlib...
+func Max[T ~int64](a, b T) T {
     if a > b {
         return a
     }
     return b
 }
+
+
+func Min[T ~int64](a, b T) T {
+    if a < b {
+        return a
+    }
+    return b
+}
+
 
 type Statistics struct {
     sent int64
@@ -22,10 +33,13 @@ type Statistics struct {
     sentBytes int64
     receivedBytes int64
     clockDeltaNs int64
+    file *os.File
 }
 
 
-func (stats *Statistics) Sent(numBytes int, clockDelta time.Duration) {
+func (stats *Statistics) Sent(numBytes int, targetTime time.Time) {
+    clockDelta := time.Since(targetTime)
+
     atomic.AddInt64(&stats.sent, 1)
     atomic.AddInt64(&stats.sentBytes, int64(numBytes))
     atomic.AddInt64(&stats.clockDeltaNs, clockDelta.Nanoseconds())
@@ -53,9 +67,25 @@ func (stats *Statistics) Reset() {
 }
 
 
+func (stats *Statistics) LogToCSV(filename string) {
+    f, err := os.Create(filename)
+    stats.file = f
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    stats.file.WriteString("Sent,Sent bytes,Received,Received bytes,Lost,Mean lateness ns\n")
+}
+
+
 func (stats *Statistics) StartWatchThread(wg *sync.WaitGroup, interval time.Duration) {
     go func() {
         defer wg.Done()
+
+        if stats.file != nil {
+            defer stats.file.Close()
+        }
 
         intervalS := float32(interval / time.Second)
 
@@ -72,14 +102,20 @@ func (stats *Statistics) StartWatchThread(wg *sync.WaitGroup, interval time.Dura
             recvKb := (recvKB * 8) / intervalS
             sentMb := sentKb / 1024
             recvMb := recvKb / 1024
+            avgInaccuracy := time.Duration(stats.clockDeltaNs / Max(1, stats.sent))
 
             fmt.Println("---------------- Statistics ----------------")
             fmt.Println("Interval: ", interval)
             fmt.Printf("Sent:      %v packets, %v KB, %v Kb/s, %v Mb/s\n", stats.sent, sentKB, sentKb, sentMb)
             fmt.Printf("Received:  %v packets, %v KB, %v Kb/s, %v Mb/s\n", stats.received, recvKB, recvKb, recvMb)
             fmt.Printf("Lost:      %v packets\n", stats.lost)
-            fmt.Printf("Avg. clock inaccuracy: %v\n", time.Duration(stats.clockDeltaNs / Max(1, stats.sent)))
+            fmt.Printf("Avg. clock inaccuracy: %v\n", avgInaccuracy)
             fmt.Println("--------------------------------------------")
+
+            if stats.file != nil {
+                fmt.Fprintf(stats.file, "%d,%d,%d,%d,%d,%d\n", stats.sent, stats.sentBytes, stats.received, stats.receivedBytes, stats.lost, avgInaccuracy)
+            }
+
             stats.Reset()
         }
     }()
