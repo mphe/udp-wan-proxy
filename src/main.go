@@ -21,6 +21,7 @@ func main() {
     jitter_ms := parser.Int("j", "jitter", &argparse.Options{Required: false, Help: "Random packet jitter in milliseconds", Default: 0})
     probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur (0.0 - 1.0)", Default: 0.0})
     probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end (0.0 - 1.0)", Default: 0.0})
+    csv_file := parser.String("", "csv_file", &argparse.Options{Required: false, Help: "Output CSV file for stats"})
 
     err := parser.Parse(os.Args)
 
@@ -44,6 +45,10 @@ func main() {
 
     pq := NewPacketQueue(MAX_PACKET_QUEUE_SIZE)
     stats := Statistics{}
+
+    if csv_file != nil {
+	stats.LogToCSV(*csv_file)
+    }
 
     var wg sync.WaitGroup
     wg.Add(1)

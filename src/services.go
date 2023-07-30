@@ -10,7 +10,6 @@ import (
     "time"
 )
 
-// const RUNNING_LATE_WARN_THRESHOLD = time.Duration(500) * time.Microsecond
 const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
 const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
 
@@ -71,9 +70,7 @@ func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *St
         targetTime := queue.timeQueue.Peek().priority
         timeDelta := time.Until(targetTime)  // Ensure time.Now() gets evaluated after Peek()
 
-        if timeDelta < 0 {
-            // fmt.Println("Target time behind schedule", timeDelta)
-        } else {
+        if timeDelta > 0 {
             if !spinSleep(timeDelta, SPINLOCK_SLEEP_TIME, queue.timeQueue.WaitForItemAdded()) {
                 continue  // New timestamp added, maybe it is scheduled earlier than the current one
             }
@@ -88,16 +85,9 @@ func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *St
         // again. If it is scheduled later, it does not matter, as we're not dealing with it.
         timestamp := queue.timeQueue.Pop().priority
 
-        // Compute clock inaccuracy
-        clockDiff := time.Since(timestamp)
-
-        // if clockDiff > RUNNING_LATE_WARN_THRESHOLD {
-        //     fmt.Println("Running late:", clockDiff, ", waited for", timeDelta)
-        // }
-
         data := <- queue.packetQueue
         _, err := sender.Write(data)
-        stats.Sent(len(data), clockDiff)
+        stats.Sent(len(data), timestamp)
 
         // Write() will cause a "connection refused" error when there is no listener on the
         // other side. We can ignore it.

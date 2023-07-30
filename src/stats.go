@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,13 +24,23 @@ type Statistics struct {
     sentBytes int64
     receivedBytes int64
     clockDeltaNs int64
+    clockLatenessNs int64
+    numLate int64
+    file *os.File
 }
 
 
-func (stats *Statistics) Sent(numBytes int, clockDelta time.Duration) {
+func (stats *Statistics) Sent(numBytes int, targetTime time.Time) {
     atomic.AddInt64(&stats.sent, 1)
     atomic.AddInt64(&stats.sentBytes, int64(numBytes))
+
+    clockDelta := time.Since(targetTime)
     atomic.AddInt64(&stats.clockDeltaNs, clockDelta.Nanoseconds())
+
+    if clockDelta > 0 {
+        atomic.AddInt64(&stats.clockLatenessNs, clockDelta.Nanoseconds())
+        atomic.AddInt64(&stats.numLate, 1)
+    }
 }
 
 
@@ -50,6 +62,20 @@ func (stats *Statistics) Reset() {
     atomic.StoreInt64(&stats.sentBytes, 0)
     atomic.StoreInt64(&stats.receivedBytes, 0)
     atomic.StoreInt64(&stats.clockDeltaNs, 0)
+    atomic.StoreInt64(&stats.clockLatenessNs, 0)
+    atomic.StoreInt64(&stats.numLate, 0)
+}
+
+
+func (stats *Statistics) LogToCSV(filename string) {
+    f, err := os.Create(filename)
+    stats.file = f
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    stats.file.WriteString("Sent,Sent bytes,Received,Received bytes,Lost,Average clock inaccuracy,Average clock lateness")
 }
 
 
@@ -72,14 +98,22 @@ func (stats *Statistics) StartWatchThread(wg *sync.WaitGroup, interval time.Dura
             recvKb := (recvKB * 8) / intervalS
             sentMb := sentKb / 1024
             recvMb := recvKb / 1024
+            avgInaccuracy := time.Duration(stats.clockDeltaNs / Max(1, stats.sent))
+            avgLateness := time.Duration(stats.clockLatenessNs / Max(1, stats.numLate))
 
             fmt.Println("---------------- Statistics ----------------")
             fmt.Println("Interval: ", interval)
             fmt.Printf("Sent:      %v packets, %v KB, %v Kb/s, %v Mb/s\n", stats.sent, sentKB, sentKb, sentMb)
             fmt.Printf("Received:  %v packets, %v KB, %v Kb/s, %v Mb/s\n", stats.received, recvKB, recvKb, recvMb)
             fmt.Printf("Lost:      %v packets\n", stats.lost)
-            fmt.Printf("Avg. clock inaccuracy: %v\n", time.Duration(stats.clockDeltaNs / Max(1, stats.sent)))
+            fmt.Printf("Avg. clock inaccuracy: %v\n", avgInaccuracy)
+            fmt.Printf("Avg. clock lateness: %v\n", avgLateness)
             fmt.Println("--------------------------------------------")
+
+            if stats.file != nil {
+                fmt.Fprintf(stats.file, "%v,%v,%v,%v,%v,%v,%v", stats.sent, stats.sentBytes, stats.received, stats.receivedBytes, stats.lost, avgInaccuracy, avgLateness)
+            }
+
             stats.Reset()
         }
     }()
