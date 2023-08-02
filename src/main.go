@@ -20,7 +20,8 @@ func main() {
     jitter_ms := parser.Int("j", "jitter", &argparse.Options{Required: false, Help: "Random packet jitter in milliseconds", Default: 0})
     probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur (0.0 - 1.0)", Default: 0.0})
     probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end (0.0 - 1.0)", Default: 0.0})
-    csv_file := parser.String("", "csv", &argparse.Options{Required: false, Help: "Output CSV file for stats"})
+    csvFile := parser.String("", "csv", &argparse.Options{Required: false, Help: "Output CSV file for stats"})
+    spinSleepNs := parser.Int("s", "sleep-interval", &argparse.Options{Required: false, Help: "Sleep interval in nanoseconds", Default: DEFAULT_SPINLOCK_SLEEP_TIME})
 
     err := parser.Parse(os.Args)
 
@@ -46,8 +47,8 @@ func main() {
     pq := NewPacketQueue(MAX_PACKET_QUEUE_SIZE)
     stats := Statistics{}
 
-    if csv_file != nil && len(*csv_file) > 0{
-	stats.LogToCSV(*csv_file)
+    if csvFile != nil && len(*csvFile) > 0{
+	stats.LogToCSV(*csvFile)
     }
 
     var wg sync.WaitGroup
@@ -56,7 +57,7 @@ func main() {
     wg.Add(1)
     go RunListener(&wg, *listen_port, pq, &wan, &stats)
     wg.Add(1)
-    go RunSender(&wg, *relay_port, pq, &stats)
+    go RunSender(&wg, *relay_port, pq, &stats, time.Duration(*spinSleepNs))
 
     wg.Wait()
     pq.Close()

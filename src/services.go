@@ -10,9 +10,9 @@ import (
     "time"
 )
 
-// TODO: Make these configurable through CLI
+// TODO: Make this configurable through CLI
 const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
-const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
+const DEFAULT_SPINLOCK_SLEEP_TIME = time.Duration(300) * time.Nanosecond
 
 
 func RunListener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *WAN, stats *Statistics) {
@@ -54,9 +54,10 @@ func RunListener(wg *sync.WaitGroup, listen_port int, queue *PacketQueue, wan *W
 }
 
 
-func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *Statistics) {
+func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *Statistics, sleepInterval time.Duration) {
     defer wg.Done()
 
+    fmt.Println("Using sleep interval of", sleepInterval)
     fmt.Println("Starting relay to", relay_port)
     sender, err := net.DialUDP("udp", nil, &net.UDPAddr { Port: relay_port })
 
@@ -72,7 +73,7 @@ func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *St
         interruptChan := queue.timeQueue.WaitForItemAdded()
         targetTime := queue.timeQueue.Peek().priority
 
-        if !spinSleep(targetTime, SPINLOCK_SLEEP_TIME, interruptChan) {
+        if !spinSleep(targetTime, sleepInterval, interruptChan) {
             continue  // New timestamp added, maybe it is scheduled earlier than the current one
         }
 
