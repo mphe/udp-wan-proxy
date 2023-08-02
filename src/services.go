@@ -10,6 +10,7 @@ import (
     "time"
 )
 
+// TODO: Make these configurable through CLI
 const SOCKET_RW_BUFFER_SIZE = 20 * 1024 * 1024  // 20 MB
 const SPINLOCK_SLEEP_TIME = time.Duration(100) * time.Nanosecond
 
@@ -67,13 +68,12 @@ func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *St
     defer sender.Close()
 
     for {
+        // Get the item-added channel first, to ensure not missing any updates
+        interruptChan := queue.timeQueue.WaitForItemAdded()
         targetTime := queue.timeQueue.Peek().priority
-        timeDelta := time.Until(targetTime)  // Ensure time.Now() gets evaluated after Peek()
 
-        if timeDelta > 0 {
-            if !spinSleep(timeDelta, SPINLOCK_SLEEP_TIME, queue.timeQueue.WaitForItemAdded()) {
-                continue  // New timestamp added, maybe it is scheduled earlier than the current one
-            }
+        if !spinSleep(targetTime, SPINLOCK_SLEEP_TIME, interruptChan) {
+            continue  // New timestamp added, maybe it is scheduled earlier than the current one
         }
 
         // Finished waiting, pop the timestamp.
@@ -103,27 +103,24 @@ func RunSender(wg *sync.WaitGroup, relay_port int, queue *PacketQueue, stats *St
 // Sleep for "duration" in intervals of "sleepInterval". interrupt_chan is a channel that can be
 // written to break the sleep and return.
 // Returns false when it was interrupted, true otherwise.
-func spinSleep(duration time.Duration, sleepInterval time.Duration, interrupt_chan <-chan struct{}) bool {
-    targetTime := time.Now().Add(duration)
+func spinSleep(targetTime time.Time, sleepInterval time.Duration, interruptChan <-chan struct{}) bool {
+    for {
+        remaining := time.Until(targetTime)
 
-    for duration > 0 {
-        sleep := sleepInterval
-        if duration < sleep {
-            sleep = duration
+        if remaining <= 0 {
+            return true
         }
 
-        if interrupt_chan == nil {
+        sleep := Min(sleepInterval, remaining)
+
+        if interruptChan == nil {
             time.Sleep(sleep)
         } else {
             select {
             case <-time.After(sleep):
-            case <-interrupt_chan:
+            case <-interruptChan:
                 return false
             }
         }
-
-        duration = time.Until(targetTime)
     }
-
-    return true
 }

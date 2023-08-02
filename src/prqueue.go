@@ -68,10 +68,11 @@ func (pq *PriorityQueue[T]) Push(priority PriorityT, data T) {
 
     // Broadcast the itemAdded signal by closing the channel and at the same time create a new
     // channel for the next broadcast.
-    // NOTE: Since WaitForItemAdded() requires a read lock, it is ensured that code cannot access
-    // the itemAdded channel in a closed state.
-    close(pq.itemAdded)
+    // NOTE: We first create a new channel to ensure that code cannot access the itemAdded channel
+    // in a closed state. This way we can get rid of a read lock in WaitForItemAdded().
+    old := pq.itemAdded
     pq.itemAdded = make(chan struct{})
+    close(old)
 }
 
 // Pops the top item from the priority queue. Blocks if the queue is empty.
@@ -92,6 +93,7 @@ func (pq *PriorityQueue[T]) Peek() Item[T] {
 }
 
 func (pq *PriorityQueue[T]) Len() int {
+    // TODO: is this lock actually necessary?
     pq.mu.RLock()
     defer pq.mu.RUnlock()
     return pq.items.Len()
@@ -104,8 +106,6 @@ func (pq *PriorityQueue[T]) IsEmpty() bool {
 
 // Returns a channel that can be listened on to wait until the next item is added.
 func (pq *PriorityQueue[T]) WaitForItemAdded() <-chan struct{} {
-    pq.mu.RLock()
-    defer pq.mu.RUnlock()
     return pq.itemAdded
 }
 
@@ -115,8 +115,9 @@ func (pq *PriorityQueue[T]) _WaitForData(locker sync.Locker) {
     // We can't use pq.IsEmpty() here, because it would require a read lock in Len() but we can't
     // require a read lock if holding a write lock.
     for pq.items.Len() == 0 {
+        wait_chan := pq.WaitForItemAdded() // Get the channel while we are still 100% sure the list is empty
         locker.Unlock()
-        <-pq.WaitForItemAdded()
+        <-wait_chan
         locker.Lock()
     }
 }
