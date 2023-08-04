@@ -21,7 +21,7 @@ func main() {
     probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur (0.0 - 1.0)", Default: 0.0})
     probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end (0.0 - 1.0)", Default: 0.0})
     csvFile := parser.String("", "csv", &argparse.Options{Required: false, Help: "Output CSV file for stats"})
-    spinSleepNs := parser.Int("s", "sleep-interval", &argparse.Options{Required: false, Help: "Sleep interval in nanoseconds", Default: DEFAULT_SPINLOCK_SLEEP_TIME})
+    spinSleepNs := parser.Int("s", "sleep-interval", &argparse.Options{Required: false, Help: "Sleep interval in nanoseconds", Default: int(DEFAULT_SPINLOCK_SLEEP_TIME)})
 
     err := parser.Parse(os.Args)
 
