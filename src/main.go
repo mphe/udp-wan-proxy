@@ -18,6 +18,7 @@ func main() {
     relay_port := parser.Int("r", "relay", &argparse.Options{Required: true, Help: "Port to relay packets to"})
     delay_ms := parser.Int("d", "delay", &argparse.Options{Required: false, Help: "Packet delay in milliseconds", Default: 0})
     jitter_ms := parser.Int("j", "jitter", &argparse.Options{Required: false, Help: "Random packet jitter in milliseconds", Default: 0})
+    probPacketLoss := parser.Float("", "loss", &argparse.Options{Required: false, Help: "Probability for a packet to get dropped (0.0 - 1.0)", Default: 0.0})
     probPacketLossStart := parser.Float("", "loss-start", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to occur (0.0 - 1.0)", Default: 0.0})
     probPacketLossStop := parser.Float("", "loss-stop", &argparse.Options{Required: false, Help: "Probability for a packet loss phase to end (0.0 - 1.0)", Default: 0.0})
     csvFile := parser.String("", "csv", &argparse.Options{Required: false, Help: "Output CSV file for stats"})
@@ -35,6 +36,15 @@ func main() {
     fmt.Println("NumCPU", runtime.NumCPU())
     fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0))
     fmt.Println()
+
+    if *probPacketLoss != 0.0 {
+	if *probPacketLossStart != 0.0 || *probPacketLossStop != 0.0 {
+	    log.Fatal("-loss and -loss-start/-loss-stop are mutually exclusive.")
+	}
+
+	*probPacketLossStart = *probPacketLoss
+	*probPacketLossStop = 1.0 - *probPacketLoss
+    }
 
     wan := WAN {
 	delay: time.Duration(*delay_ms) * time.Millisecond,
