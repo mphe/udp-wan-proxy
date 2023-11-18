@@ -53,6 +53,25 @@ The following shows some examples for a proxy listening on port 5004 and relayin
 ```
 
 
+## Architecture
+
+<center><img src="img/udp_proxy_arch.png" width=700px/></center>
+
+The proxy consists of a sender and listener thread that run in parallel.
+The listener receives incoming packets and adds them to a queue.
+The sender takes packets from the queue and relays them to the target port.
+
+When the listener receives a packet, the configured packet loss distribution is sampled and the packed is dropped or retained accordingly.
+If the packet is retained, a new timestamp is computed, based on the given delay and jitter, determining when the packet should be dispatched again.
+The dispatch timestamp and the packet will be put into separate queues. The packet queue is a regular FIFO queue, while the time queue is a priority queue.
+
+The sender thread takes the most recent timestamp from the time queue, waits until the given point in time is reached, then fetches the next packet from the packet queue and sends it to the target port.
+If a new packet and timestamp arrives while the thread is waiting, the sleep gets interrupted, the new time is fetched and the loop restarts.
+
+When dealing with jitter, the computed dispatch timestamps can easily overlap each other, causing large amounts of unwanted packet reordering.
+By using distinct queues for packets and timestamps, it can be guaranteed that packets are processed in the same order as they arrive, while timestamps are automatically sorted by their due date, maintaining the computed jitter and the original traffic characteristics, e.g. burst/non-burst phases.
+
+
 ## Performance
 
 The proxy provides sub-millisecond performance, but could be optimized further.
@@ -102,6 +121,7 @@ Then run `sudo sysctl --system` to load the new config.
 ## To-Do
 
 - Bandwidth emulation
+- Packet reordering
 - Configurable socket buffer size
 
 
